@@ -1,0 +1,41 @@
+#!/bin/bash
+
+if test $# -lt 2
+then
+     echo "USAGE : bindApache <IP address> <interface>"
+     echo "Exemple : bindApache 10.0.0.254 at0"
+     exit 1
+else
+     echo -en ""  
+fi
+
+IP_ADDRESS=$1
+SERVER_IFACE=$2
+HOSTNAME=hostname
+
+echo -en "Binding Apache2 to $IP_ADDRESS on "$SERVER_IFACE"... "
+
+ifconfig $SERVER_IFACE $IP_ADDRESS
+
+echo "
+127.0.0.1 localhost
+127.0.1.1 $HOSTNAME
+$IP_ADDRESS localhost.localdomain localhost
+
+# The following lines are desirable for IPv6 capable hosts
+::1     localhost ip6-localhost ip6-loopback
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+
+" > /etc/hosts
+
+echo "
+<VirtualHost *:80>
+ServerName ""$IP_ADDRESS""
+ServerAlias www.HOTSPOTBindApache.com
+DocumentRoot /var/www/html
+</VirtualHost>
+
+" >> /etc/apache2/sites-enabled/000-default.conf
+
+service apache2 restart

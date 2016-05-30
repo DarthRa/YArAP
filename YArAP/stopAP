@@ -1,0 +1,32 @@
+#!/bin/bash
+VERT="\\033[1;32m"
+BLANC="\\033[0;39m"
+ROUGE="\\033[1;31m"
+
+taskDone() {
+echo -e "$VERT""Done""$BLANC"
+}
+
+echo -en "Killing NetworkManager... "
+pkill NetworkManager
+taskDone
+echo -en "Killing DHCP... "
+pkill dhclient
+taskDone
+echo -en "Killing DHCPD... "
+pkill dhcpd
+taskDone
+echo -en "Killing wpa_supplicant... "
+pkill wpa_supplicant
+taskDone
+echo -en "Killing Airbase-ng... "
+pkill airbase-ng
+taskDone
+echo -en "Stop wlanmon0... "
+airmon-ng stop wlan0mon >/dev/null 2>&1
+taskDone
+echo -en "Stop apache2... "
+service apache2 stop
+taskDone
+
+echo -e "$VERT""Server is down.""$BLANC"

